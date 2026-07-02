@@ -106,6 +106,7 @@
     <button class="btn g" onclick="App.startTraining()">トレーニング（1人で練習）</button>
     <button class="btn p" onclick="App.openVersus()">対戦（2〜4人オンライン）</button>
     <button class="btn y" onclick="App.showHelp()">あそびかた / 操作説明</button>
+    <button class="btn gray sm" onclick="App.reloadLatest()">🔄 最新に更新</button>
   </div>
 </div>
 
@@ -253,13 +254,35 @@ const Scene = {
     head.position.y = 1.78; g.add(head);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.42,16,12), new THREE.MeshBasicMaterial({color:0xffffff}));
     eye.position.set(0,1.82,0.14); eye.scale.set(1,0.5,0.6); g.add(eye);
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.18,0.18,0.8), new THREE.MeshLambertMaterial({color:0x2a2f3a}));
-    gun.position.set(0.32,1.25,0.5); g.add(gun);
+    // 右腕＋銃（背後からでもハッキリ分かるよう大きめ・銃口を明るく）
+    const gunG = new THREE.Group();
+    const gunMat = new THREE.MeshLambertMaterial({color:0x22252d});
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,0.5,8), new THREE.MeshLambertMaterial({color:col}));
+    arm.rotation.x = Math.PI/2; arm.position.set(0,0,0.28); gunG.add(arm);
+    const rec = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.28,0.52), gunMat);
+    rec.position.set(0,-0.02,0.64); gunG.add(rec);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.72,10), gunMat);
+    barrel.rotation.x = Math.PI/2; barrel.position.set(0,0.05,1.06); gunG.add(barrel);
+    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.11,0.14,10), new THREE.MeshBasicMaterial({color:0xffd23c}));
+    tip.rotation.x = Math.PI/2; tip.position.set(0,0.05,1.45); gunG.add(tip);
+    gunG.position.set(0.34,1.34,0); g.add(gunG);
     this.scene.add(g); return g;
   },
   makeBall(colIdx){
-    const m = new THREE.Mesh(new THREE.SphereGeometry(CFG.bulletR,14,12), new THREE.MeshBasicMaterial({color:PCOL[colIdx%PCOL.length]}));
-    this.scene.add(m); return m;
+    const g = new THREE.Group();
+    const col = PCOL[colIdx % PCOL.length];
+    const core = new THREE.Mesh(new THREE.SphereGeometry(CFG.bulletR,14,12), new THREE.MeshBasicMaterial({color:col}));
+    g.add(core);
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(CFG.bulletR*1.8,12,10), new THREE.MeshBasicMaterial({color:col, transparent:true, opacity:0.32, depthWrite:false}));
+    g.add(halo); g.userData.core = core;
+    this.scene.add(g); return g;
+  },
+  makeFlash(){
+    const g = new THREE.Group();
+    const a = new THREE.Mesh(new THREE.SphereGeometry(0.26,10,8), new THREE.MeshBasicMaterial({color:0xffffff}));
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.52,10,8), new THREE.MeshBasicMaterial({color:0xffcc44, transparent:true, opacity:0.7, depthWrite:false}));
+    g.add(a); g.add(b);
+    this.scene.add(g); return g;
   },
   remove(obj){ if(obj) this.scene.remove(obj); },
 };
@@ -281,12 +304,13 @@ function Player(id, colIdx, isBot){
 }
 
 const World = {
-  players:{}, order:[], bullets:[], _bid:1, events:[], me:null, mode:'training', elapsed:0,
+  players:{}, order:[], bullets:[], flashes:[], _bid:1, events:[], me:null, mode:'training', elapsed:0,
   reset(specs, mode){
     // 後始末
     for(const id in this.players){ Scene.remove(this.players[id].mesh); }
     for(const b of this.bullets) Scene.remove(b.mesh);
-    this.players={}; this.order=[]; this.bullets=[]; this.events=[]; this.elapsed=0; this.mode=mode;
+    for(const f of this.flashes) Scene.remove(f.mesh);
+    this.players={}; this.order=[]; this.bullets=[]; this.flashes=[]; this.events=[]; this.elapsed=0; this.mode=mode;
     let i=0;
     for(const sp of specs){
       const p = Player(sp.id, sp.colIdx, sp.isBot);
@@ -340,13 +364,19 @@ const World = {
     if(best) dir.lerp(best,0.5).normalize();
     return dir;
   },
+  muzzleWorld(p){
+    const c=Math.cos(p.yaw), s=Math.sin(p.yaw), mlx=0.34, mly=1.38, mlz=1.5;
+    return V3(p.pos.x + mlx*c + mlz*s, p.pos.y + mly, p.pos.z - mlx*s + mlz*c);
+  },
   spawnBullet(p){
     const dir = this.aimDir(p);
     if(p.isBot){ dir.x+=(Math.random()-0.5)*0.16; dir.y+=(Math.random()-0.5)*0.10; dir.z+=(Math.random()-0.5)*0.16; dir.normalize(); }
-    const origin = p.pos.clone().add(V3(0,1.3,0)).add(dir.clone().multiplyScalar(0.9));
+    const origin = this.muzzleWorld(p);
     const b = { id:this._bid++, owner:p.id, colIdx:p.colIdx, ttl:CFG.bulletTTL,
-      pos:origin, vel:dir.multiplyScalar(CFG.bulletSpeed), mesh:Scene.makeBall(p.colIdx) };
-    b.mesh.position.copy(origin); this.bullets.push(b);
+      pos:origin.clone(), vel:dir.multiplyScalar(CFG.bulletSpeed), mesh:Scene.makeBall(p.colIdx) };
+    b.mesh.position.copy(origin); b.mesh.lookAt(origin.clone().add(b.vel)); b.mesh.scale.set(1,1,2.2);
+    this.bullets.push(b);
+    const fm = Scene.makeFlash(); fm.position.copy(origin); this.flashes.push({mesh:fm, life:0.09});
   },
 
   step(dt){
@@ -363,6 +393,7 @@ const World = {
     for(let i=this.bullets.length-1;i>=0;i--){
       const b=this.bullets[i]; b.ttl-=dt;
       b.pos.addScaledVector(b.vel, dt);
+      b.mesh.position.copy(b.pos);
       let dead = b.ttl<=0 || b.pos.y<=0 || b.pos.y>30 || Math.abs(b.pos.x)>CFG.arena || Math.abs(b.pos.z)>CFG.arena;
       if(!dead){ // 障害物
         for(const o of Scene.obstacles){ if(b.pos.y<o.h && Math.abs(b.pos.x-o.x)<o.w/2+CFG.bulletR && Math.abs(b.pos.z-o.z)<o.d/2+CFG.bulletR){ dead=true; break; } }
@@ -380,6 +411,11 @@ const World = {
         }
       }
       if(dead){ Scene.remove(b.mesh); this.bullets.splice(i,1); }
+    }
+    for(let i=this.flashes.length-1;i>=0;i--){
+      const f=this.flashes[i]; f.life-=dt;
+      if(f.life<=0){ Scene.remove(f.mesh); this.flashes.splice(i,1); }
+      else f.mesh.scale.setScalar(Math.max(0.05, f.life/0.09));
     }
   },
   respawn(p){
@@ -423,7 +459,7 @@ const World = {
     for(let i=0;i<bs.length;i++){
       let m=this._cliBalls[i];
       if(!m){ m=Scene.makeBall(bs[i][3]); this._cliBalls[i]=m; }
-      m.material.color.setHex(PCOL[bs[i][3]%PCOL.length]); m.visible=true; m.position.set(bs[i][0],bs[i][1],bs[i][2]);
+      if(m.userData.core) m.userData.core.material.color.setHex(PCOL[bs[i][3]%PCOL.length]); m.visible=true; m.position.set(bs[i][0],bs[i][1],bs[i][2]);
     }
     for(let i=bs.length;i<this._cliBalls.length;i++) if(this._cliBalls[i]) this._cliBalls[i].visible=false;
   },
@@ -691,6 +727,7 @@ const App = {
   backToTitle(){ this.scene='title'; this.role=null; UI.hide('hud'); UI.hide('controls');
     this._hideAllOverlays(); UI.show('title'); },
   showHelp(){ this._hideAllOverlays(); UI.show('help'); this.scene='help'; },
+  reloadLatest(){ location.href = location.pathname + '?v=' + Date.now(); },
   openVersus(){ this._hideAllOverlays(); UI.show('lobby'); this.scene='lobby'; UI.renderLobby({}); },
 
   _enterBattle(){ this._hideAllOverlays(); UI.show('hud'); UI.show('controls'); this.scene='battle'; },
