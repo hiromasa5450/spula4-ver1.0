@@ -49,7 +49,7 @@
   #crosshair::before,#crosshair::after{content:"";position:absolute;background:rgba(255,255,255,.85);box-shadow:0 0 2px #000;}
   #crosshair::before{left:11px;top:0;width:4px;height:26px;border-radius:2px;}
   #crosshair::after{top:11px;left:0;height:4px;width:26px;border-radius:2px;}
-  #hpwrap{position:absolute;left:16px;top:14px;width:180px;}
+  #hpwrap{position:absolute;left:16px;top:54px;width:180px;}
   #hpbar{height:16px;background:#33405a;border-radius:8px;overflow:hidden;border:2px solid rgba(0,0,0,.3);}
   #hpfill{height:100%;width:100%;background:var(--pop-g);transition:width .12s;}
   #hplabel{font-size:12px;font-weight:800;margin-top:3px;color:#cfe0ff;}
@@ -58,22 +58,22 @@
   #kills{position:absolute;right:16px;top:14px;font-size:20px;font-weight:900;text-shadow:0 2px 4px rgba(0,0,0,.5);}
   #feed{position:absolute;right:16px;top:52px;text-align:right;font-size:14px;font-weight:700;}
   #feed div{margin:2px 0;opacity:.9;text-shadow:0 1px 2px #000;}
-  #btnPause{position:absolute;left:14px;bottom:14px;pointer-events:auto;background:#1c2740cc;border:1px solid #38466a;
+  #btnPause{position:absolute;left:12px;top:10px;pointer-events:auto;background:#1c2740cc;border:1px solid #38466a;
     color:#cfe0ff;border-radius:12px;padding:10px 14px;font-weight:800;font-size:14px;}
   #dmg{position:absolute;inset:0;background:radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(255,40,40,.45));
     opacity:0;transition:opacity .1s;}
 
   /* ---- タッチ操作 ---- */
   #controls{position:fixed;inset:0;z-index:11;pointer-events:none;}
-  #stick{position:absolute;left:26px;bottom:26px;width:130px;height:130px;border-radius:50%;
+  #stick{position:absolute;left:26px;bottom:calc(24px + env(safe-area-inset-bottom));width:130px;height:130px;border-radius:50%;
     background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.25);pointer-events:auto;}
   #knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;
     background:rgba(255,255,255,.55);}
   #stick .lbl,.pad .lbl{position:absolute;left:0;right:0;bottom:-22px;text-align:center;font-size:12px;color:#cfe0ff;font-weight:800;}
   .pad{position:absolute;border-radius:50%;pointer-events:auto;display:flex;align-items:center;justify-content:center;
     font-weight:900;color:#08122a;box-shadow:0 4px 0 rgba(0,0,0,.3);}
-  #btnFire{right:26px;bottom:30px;width:104px;height:104px;background:var(--pop-o);font-size:20px;}
-  #btnJump{right:150px;bottom:64px;width:66px;height:66px;background:var(--pop-b);font-size:16px;}
+  #btnFire{right:24px;bottom:calc(34px + env(safe-area-inset-bottom));width:112px;height:112px;background:var(--pop-o);font-size:20px;}
+  #btnJump{right:148px;bottom:calc(78px + env(safe-area-inset-bottom));width:66px;height:66px;background:var(--pop-b);font-size:16px;}
   #btnFire:active,#btnJump:active{filter:brightness(1.15);}
   .deco{position:absolute;border-radius:50%;opacity:.5;filter:blur(1px);}
 </style>
@@ -177,7 +177,7 @@ const CFG = {
   bulletR: 0.34,      // 少し大きめの丸い球
   bulletSpeed: 30,
   bulletTTL: 2.0,
-  bulletDmg: 24,
+  bulletDmg: 13,
   fireInterval: 0.16,
   hp: 100,
   respawn: 2.2,
@@ -271,8 +271,8 @@ function Player(id, colIdx, isBot){
   return {
     id, colIdx, isBot:!!isBot, name:'',
     pos:V3(0,0,0), vel:V3(0,0,0), yaw:0, pitch:0,
-    onGround:true, hp:CFG.hp, alive:true, respawnT:0, score:0, fireCd:0, hurtT:0,
-    input:{mx:0,my:0,fire:false,jump:false},
+    onGround:true, hp:CFG.hp, alive:true, respawnT:0, score:0, fireCd:0, hurtT:0, invuln:0,
+    input:{mx:0,my:0,fire:false,jump:false,fireLatch:false},
     mesh:null, aimAssist:false,
     // client補間用
     tpos:V3(0,0,0), tyaw:0,
@@ -293,7 +293,7 @@ const World = {
       p.name = sp.name || (sp.isBot?('BOT'+(i)):('P'+(i+1)));
       p.aimAssist = !sp.isBot;
       p.mesh = Scene.makeFigure(sp.colIdx);
-      const s = Scene.spawns[i % Scene.spawns.length]; p.pos.copy(s); p.tpos.copy(s);
+      const s = Scene.spawns[i % Scene.spawns.length]; p.pos.copy(s); p.tpos.copy(s); p.invuln=1.6;
       this.players[sp.id]=p; this.order.push(sp.id); i++;
     }
   },
@@ -303,7 +303,7 @@ const World = {
   /* 移動＋重力＋衝突（training/host と client予測で共用） */
   integrate(p, dt){
     // 水平移動（yaw基準）
-    const f = V3(Math.sin(p.yaw),0,Math.cos(p.yaw)); const r = V3(Math.cos(p.yaw),0,-Math.sin(p.yaw));
+    const f = V3(Math.sin(p.yaw),0,Math.cos(p.yaw)); const r = V3(-Math.cos(p.yaw),0,Math.sin(p.yaw));
     let dx = r.x*p.input.mx + f.x*p.input.my, dz = r.z*p.input.mx + f.z*p.input.my;
     const len = Math.hypot(dx,dz); if(len>1){ dx/=len; dz/=len; }
     p.pos.x += dx*CFG.moveSpeed*dt; p.pos.z += dz*CFG.moveSpeed*dt;
@@ -342,6 +342,7 @@ const World = {
   },
   spawnBullet(p){
     const dir = this.aimDir(p);
+    if(p.isBot){ dir.x+=(Math.random()-0.5)*0.16; dir.y+=(Math.random()-0.5)*0.10; dir.z+=(Math.random()-0.5)*0.16; dir.normalize(); }
     const origin = p.pos.clone().add(V3(0,1.3,0)).add(dir.clone().multiplyScalar(0.9));
     const b = { id:this._bid++, owner:p.id, colIdx:p.colIdx, ttl:CFG.bulletTTL,
       pos:origin, vel:dir.multiplyScalar(CFG.bulletSpeed), mesh:Scene.makeBall(p.colIdx) };
@@ -353,9 +354,10 @@ const World = {
     for(const p of this.list()){
       if(!p.alive){ p.respawnT-=dt; if(p.respawnT<=0) this.respawn(p); continue; }
       if(p.hurtT>0) p.hurtT-=dt;
+      if(p.invuln>0) p.invuln-=dt;
       this.integrate(p,dt);
       p.fireCd-=dt;
-      if(p.input.fire && p.fireCd<=0){ this.spawnBullet(p); p.fireCd=CFG.fireInterval; }
+      if((p.input.fire||p.input.fireLatch) && p.fireCd<=0){ this.spawnBullet(p); p.fireCd=CFG.fireInterval; p.input.fireLatch=false; }
     }
     // 弾の更新
     for(let i=this.bullets.length-1;i>=0;i--){
@@ -367,7 +369,7 @@ const World = {
       }
       if(!dead){ // プレイヤー
         for(const q of this.list()){
-          if(q.id===b.owner || !q.alive) continue;
+          if(q.id===b.owner || !q.alive || q.invuln>0) continue;
           const c=q.pos.clone().add(V3(0,CFG.playerH*0.5,0));
           if(b.pos.distanceTo(c) < CFG.playerR+CFG.bulletR){
             q.hp -= CFG.bulletDmg; q.hurtT=0.18; dead=true;
@@ -385,13 +387,13 @@ const World = {
     let best=Scene.spawns[0], bestD=-1;
     for(const s of Scene.spawns){ let d=1e9; for(const q of this.list()) if(q!==p&&q.alive) d=Math.min(d,q.pos.distanceTo(s));
       if(d>bestD){ bestD=d; best=s; } }
-    p.pos.copy(best); p.vel.set(0,0,0); p.hp=CFG.hp; p.alive=true; p.onGround=true; p.fireCd=0.3;
+    p.pos.copy(best); p.vel.set(0,0,0); p.hp=CFG.hp; p.alive=true; p.onGround=true; p.fireCd=0.3; p.invuln=1.6;
   },
 
   // 見た目の更新（sim値→mesh）
   syncMeshes(){
     for(const p of this.list()){
-      p.mesh.visible = p.alive;
+      p.mesh.visible = p.alive && (p.invuln<=0 || Math.floor(performance.now()/120)%2===0);
       p.mesh.position.copy(p.pos); p.mesh.rotation.y = p.yaw;
       const flash = p.hurtT>0 ? 0.5 : 0; p.mesh.children[0].material.emissive && p.mesh.children[0].material.emissive.setScalar(flash);
     }
@@ -457,7 +459,7 @@ function botThink(b, dt){
   b.input.mx = Math.sin(b._wander)*0.7;
   if(b._botT<0 && b.onGround && Math.random()<0.3){ b.input.jump=true; b._botT=1+Math.random()*2; }
   // 射撃：正面かつ射程
-  b.input.fire = dist<55 && Math.abs(dyaw)<0.25;
+  b.input.fire = dist<42 && Math.abs(dyaw)<0.13 && Math.random()<0.5;
 }
 
 /* =========================================================================
@@ -486,7 +488,7 @@ const Input = {
     window.addEventListener('keydown', e=>{ this.key[e.key.toLowerCase()]=true; if(e.key===' '){ const p=World.local(); if(p)p.input.jump=true; } });
     window.addEventListener('keyup', e=>{ this.key[e.key.toLowerCase()]=false; });
   },
-  _setFire(v){ const p=World.local(); if(p) p.input.fire=v; this._fireHeld=v; },
+  _setFire(v){ const p=World.local(); if(p){ p.input.fire=v; if(v) p.input.fireLatch=true; } this._fireHeld=v; },
   _stickStart(e){ this.stickId=e.pointerId; const r=this.stickEl.getBoundingClientRect();
     this.stickC={x:r.left+r.width/2, y:r.top+r.height/2}; this._stickMove(e.clientX,e.clientY); this.stickEl.setPointerCapture(e.pointerId); },
   _stickMove(x,y){ let dx=x-this.stickC.x, dy=y-this.stickC.y; const d=Math.hypot(dx,dy);
@@ -497,7 +499,7 @@ const Input = {
     if(e.pointerId===this.stickId){ this._stickMove(e.clientX,e.clientY); return; }
     if(e.pointerId===this.lookId || (this.mouseDown&&e.pointerType==='mouse')){
       const dx=e.clientX-this._lx, dy=e.clientY-this._ly; this._lx=e.clientX; this._ly=e.clientY;
-      const p=World.local(); if(p){ p.yaw += dx*0.005; p.pitch = clamp(p.pitch - dy*0.005, -0.9, 1.0); }
+      const p=World.local(); if(p){ p.yaw -= dx*0.005; p.pitch = clamp(p.pitch - dy*0.005, -0.9, 1.0); }
     }
   },
   _up(e){
@@ -727,7 +729,7 @@ const App = {
       } else if(this.role==='client'){
         const me=World.local(); if(me){ World.integrate(me,dt); } // 自機は簡易予測
         World.interpolate(dt);
-        this._acc+=dt; if(this._acc>=1/CFG.netHz){ this._acc=0; const p=World.local(); if(p) Net.writeInput({mx:p.input.mx,my:p.input.my,fire:p.input.fire,jump:p.input.jump,yaw:p.yaw,pitch:p.pitch}); }
+        this._acc+=dt; if(this._acc>=1/CFG.netHz){ this._acc=0; const p=World.local(); if(p){ Net.writeInput({mx:p.input.mx,my:p.input.my,fire:(p.input.fire||p.input.fireLatch),jump:p.input.jump,yaw:p.yaw,pitch:p.pitch}); p.input.fireLatch=false; } }
       }
       updateCamera(); UI.updateHUD();
     }
